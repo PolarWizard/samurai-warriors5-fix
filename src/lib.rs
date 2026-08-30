@@ -20,8 +20,8 @@ use windows::Win32::System::Threading::{
 const GAME_ASPECT: f32 = 16.0 / 9.0;
 
 /// The render width and height every fix measures against, resolved once at
-/// startup by [`config::resolve_resolution`] -- from the config file if set,
-/// otherwise the primary display's current mode.
+/// startup by [`config::resolve_resolution`] eitehr from the config file if
+/// set, otherwise the primary display's current resolution.
 static RENDER_WIDTH: AtomicU32 = AtomicU32::new(0);
 static RENDER_HEIGHT: AtomicU32 = AtomicU32::new(0);
 
@@ -36,23 +36,18 @@ fn log_open(module: &ModuleInfo) {
     log(&format!("Module Path: {}", module.path));
     log(&format!("Module Addr: {:#x}", module.address.0 as usize));
     log(&format!("Module Size: {:#x} ({} bytes)", module.size, module.size));
-    log(&format!("Module Modified: {}", module.modified));
     log("-------------------------------------");
 }
 
-/// Applies every fix. Runs once, on a thread spawned from `DllMain`, and never
-/// exits or unwinds it: every hook here is meant to outlive the process, not
-/// be reversible. `MidHook::uninstall` cannot prove no thread is still
-/// executing inside a trampoline without first suspending every thread, so
-/// removing a hook while the game runs risks a crash if another thread is
-/// mid-call through it. One-shot, permanent hooks sidestep the problem
-/// entirely: nothing is ever removed while the process is alive, so there is
-/// nothing to race.
-/// `this_module` is *this DLL's own* handle -- `DllMain`'s first parameter,
-/// threaded through via `CreateThread`'s `lpParameter` -- not the game's. It
-/// only exists to locate the config file next to this DLL regardless of the
-/// game's current working directory; nothing else here needs it.
-fn init(this_module: HMODULE) {
+/// True entry point of the DLL.
+///
+/// Applies all fixes and features of this mod to the game process it was
+/// attached to based on the `Config` using `this_module` to determine
+/// where the path on the filesystem where the exe is stored.
+///
+/// Panics are isolated and captured so if one is thrown it does not crash
+/// the process and it is logged for debugging.
+fn main(this_module: HMODULE) {
     // Catch a panic's message and location reach the log file rather than vanishing.
     std::panic::set_hook(Box::new(|info| log_error(&format!("panic: {info}"))));
 
@@ -65,7 +60,7 @@ fn init(this_module: HMODULE) {
 
         let config = config::load(this_module);
         if !config.super_enable {
-            log("core: super_enable is false in the config, mod not applied");
+            log("main: super_enable is false in the config, mod not applied");
             return;
         }
 
@@ -80,15 +75,21 @@ fn init(this_module: HMODULE) {
     });
 
     if result.is_err() {
-        log_error("core: init panicked -- see the panic line above in this log for details");
+        log_error("main: panicked -- see the panic line above in this log for details");
     }
 }
 
-unsafe extern "system" fn init_thread(param: *mut c_void) -> u32 {
-    init(HMODULE(param));
+/// Windows ABI compatible entry point.
+///
+/// Becuase this is provided to the `CreateThread` Windows API function this
+/// function needs to compiled to use the appropriate Windows ABI. Afterwards
+/// `main`` can be called safely using the Rust ABI.
+unsafe extern "system" fn windows_main(param: *mut c_void) -> u32 {
+    main(HMODULE(param));
     0
 }
 
+/// Entry point of the DLL.
 #[unsafe(no_mangle)]
 extern "system" fn DllMain(hinst: HMODULE, reason: u32, _reserved: *mut c_void) -> i32 {
     if reason == DLL_PROCESS_ATTACH {
@@ -96,7 +97,7 @@ extern "system" fn DllMain(hinst: HMODULE, reason: u32, _reserved: *mut c_void) 
             if let Ok(thread) = CreateThread(
                 None,
                 0,
-                Some(init_thread),
+                Some(windows_main),
                 Some(hinst.0 as *const c_void),
                 THREAD_CREATION_FLAGS(0),
                 None,

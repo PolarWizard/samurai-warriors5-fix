@@ -83,6 +83,7 @@ fn load_inner(this_module: HMODULE) -> Config {
     }
 }
 
+/// Gets the filesystem path from the module.
 fn module_dir(module: HMODULE) -> Option<PathBuf> {
     let mut buf = [0u16; 260];
     let len = unsafe { GetModuleFileNameW(Some(module), &mut buf) } as usize;
@@ -94,13 +95,10 @@ fn module_dir(module: HMODULE) -> Option<PathBuf> {
         .map(|p| p.to_path_buf())
 }
 
-/// Resolves the render resolution to use: the config's override if both
-/// dimensions are set, otherwise the primary display's current mode.
+/// Resolves the render resolution to use.
 ///
-/// Resolved once, at startup, into the atomics every fix reads -- not
-/// watched afterward. Changing resolution or resizing mid-session has no
-/// effect until the process restarts (or the config is edited and the
-/// process restarted), same as the sibling SamuraiWarriors4DXFix project.
+/// Will either use the provided resolution in the `Config` or determine the
+/// resolution from the primary monitor.
 pub fn resolve_resolution(config: &Config) -> Option<(u32, u32)> {
     if config.resolution.width != 0 && config.resolution.height != 0 {
         log(&format!(

@@ -3,17 +3,14 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use grapnel::{Context, MidHook};
-use windows::Win32::Foundation::{FILETIME, HMODULE, SYSTEMTIME};
-use windows::Win32::Storage::FileSystem::FileTimeToLocalFileTime;
+use windows::Win32::Foundation::{HMODULE, SYSTEMTIME};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect};
 use windows::Win32::System::ProcessStatus::{GetModuleInformation, MODULEINFO};
 use windows::Win32::System::Threading::GetCurrentProcess;
-use windows::Win32::System::Time::FileTimeToSystemTime;
 
 static LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
 
@@ -80,7 +77,7 @@ pub fn log_error(message: &str) {
 }
 
 /// Logs at [`LogLevel::Debug`] -- available for detail that would otherwise
-/// clutter normal operation; nothing currently shipped needs it.
+/// clutter normal operation.
 #[allow(dead_code)]
 pub fn log_debug(message: &str) {
     log_at(LogLevel::Debug, message);
@@ -89,47 +86,14 @@ pub fn log_debug(message: &str) {
 /// A scanned/patched module: its base address plus everything worth logging
 /// about the file backing it.
 pub struct ModuleInfo {
+    /// Base virtual address.
     pub address: HMODULE,
+    /// Name of the module.
     pub name: String,
+    /// Path of the filesystem to the exe.
     pub path: String,
-    /// On-disk file size in bytes. A game patch changes this almost every
-    /// time, even a small one. Together with `modified`, it distinguishes
-    /// "the game updated since these signatures were written" from an
-    /// unrelated regression in a bug report.
+    /// On-disk file size in bytes.
     pub size: u64,
-    /// The file's last-modified time, formatted like every log line (see
-    /// `format_systemtime`). Converted from the filesystem's UTC `FILETIME`
-    /// through `FileTimeToLocalFileTime` first, so it reads on the same
-    /// clock as the rest of the log instead of needing a manual timezone
-    /// conversion. `"unknown"` if the conversion fails for any reason (e.g.
-    /// the file disappears between load and this call).
-    pub modified: String,
-}
-
-/// Converts a `std::time::SystemTime` to a Win32 `FILETIME` (100ns ticks
-/// since 1601-01-01) -- the input format `FileTimeToSystemTime` and
-/// `FileTimeToLocalFileTime` expect. `11_644_473_600` is the fixed number of
-/// seconds between the Windows epoch and the Unix epoch that every such
-/// conversion uses.
-fn to_filetime(t: SystemTime) -> Option<FILETIME> {
-    let dur = t.duration_since(UNIX_EPOCH).ok()?;
-    let ticks = (dur.as_secs() + 11_644_473_600) * 10_000_000 + u64::from(dur.subsec_nanos()) / 100;
-    Some(FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 })
-}
-
-/// Resolves `path`'s last-modified time to this log's local, ISO-shaped
-/// format. See `ModuleInfo::modified`.
-fn file_modified_string(path: &str) -> String {
-    (|| {
-        let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-        let utc_ft = to_filetime(modified)?;
-        let mut local_ft = FILETIME::default();
-        unsafe { FileTimeToLocalFileTime(&utc_ft, &mut local_ft).ok()? };
-        let mut st = SYSTEMTIME::default();
-        unsafe { FileTimeToSystemTime(&local_ft, &mut st).ok()? };
-        Some(format_systemtime(&st))
-    })()
-    .unwrap_or_else(|| "unknown".to_string())
 }
 
 impl ModuleInfo {
@@ -144,14 +108,15 @@ impl ModuleInfo {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.clone());
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let modified = file_modified_string(&path);
-        Self { address, name, path, size, modified }
+        Self { address, name, path, size }
     }
 }
 
 /// A mid-function hook keyed off a pattern scan.
 pub struct SignatureHook {
+    /// Name identifier for the hook.
     pub tag: &'static str,
+    /// IDA-style byte string describing where the hook should be placed.
     pub signature: &'static str,
     /// Byte offset from the pattern match to the hook point.
     pub offset: usize,
@@ -246,8 +211,7 @@ pub fn pattern_scan(module: HMODULE, signature: &str) -> Option<usize> {
 /// Scans `module` for every occurrence of `signature`, returning all matching
 /// absolute addresses.
 ///
-/// [`pattern_scan`] stops at the first hit, which is right for hook sites but
-/// wrong for data like UI strings, where the same text can appear more than
+/// Useful for data like UI strings, where the same text can appear more than
 /// once and every copy needs patching.
 pub fn pattern_scan_all(module: HMODULE, signature: &str) -> Vec<usize> {
     let Some((base, size)) = get_module_range(module) else {
@@ -275,25 +239,12 @@ pub fn pattern_scan_all(module: HMODULE, signature: &str) -> Vec<usize> {
     hits
 }
 
-/// Installs a mid-function hook at a fixed `offset` from `module`'s base,
-/// bypassing signature scanning. A no-op if `enable` is false.
+/// Installs a mid-function hook permanently at a fixed `offset` from
+/// `module`'s base, bypassing signature scanning. A no-op if `enable` is
+/// false.
 ///
-/// Signatures are right for a shipped fix: they survive a game patch moving
-/// code, and a wrong match fails loudly rather than silently. They're the
-/// wrong tool for instrumenting an address Cheat Engine just found: the
-/// offset is already exact, and crafting a signature for each probe wastes
-/// the round trip.
-///
-/// The returned handle is dropped rather than kept: `grapnel::MidHook` has no
-/// `Drop`, so a discarded handle just stays installed -- correct here, since
-/// this DLL is never unloaded while the game runs. The hook only needs to
-/// outlive the process, not be reversible.
-///
-/// No shipped fix should call this -- every fixed offset a shipped fix once
-/// used has since been converted to a signature (see `fixes::visibility` and
-/// `fixes::hud::fix_hud_marker_position` for what that conversion looks like).
-/// Kept, and deliberately not removed as dead code, for the next investigation
-/// that needs to probe an address before it is worth a signature at all.
+/// Useful for investigations that needs to probe an address before it is worth
+/// a signature at all.
 #[allow(dead_code)]
 pub fn inject_hook_at<F>(
     enable: bool,
@@ -321,10 +272,9 @@ where
     }
 }
 
-/// Scans `module` for `sh.signature` and, if found, installs a mid-function hook
-/// at the match plus `sh.offset`, calling `callback` with the full register
-/// context on every hit. A no-op if `enable` is false; `true` means it was
-/// installed. See [`inject_hook_at`] for why the handle is not kept.
+/// Scans `module` for `sh.signature` and, if found, installs a mid-function
+/// hook permanently for the duration of the main process at the address plus
+/// `sh.offset` that jumps to the `callback`. A no-op if `enable` is false.
 #[allow(dead_code)]
 pub fn inject_hook<F>(enable: bool, module: &ModuleInfo, sh: &SignatureHook, callback: F) -> bool
 where

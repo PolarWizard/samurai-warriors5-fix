@@ -417,5 +417,5 @@ fn fix_hud_marker_visibility(module: &ModuleInfo) {
     for (addr, _) in sites {
         crate::utils::patch(addr, NOPS);
     }
-    log("hud_marker_visibility: world-space HUD markers no longer rejected past x=1920");
+    log("hud_marker_visibility: world-space HUD markers no longer rejected past centered 16:9 boundary");
 }
