@@ -1,0 +1,8 @@
+# Set to true/false to enable/disable this mod.
+super_enable = true
+
+# Enter your desired resolution.
+# A value of 0 in either width or height auto-detects your primary monitor's resolution.
+[resolution]
+width = 0
+height = 0

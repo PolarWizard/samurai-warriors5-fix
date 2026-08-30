@@ -1,0 +1,45 @@
+[package]
+name = "samurai-warriors5-fix"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+# No explicit `name` here: Cargo derives one from `package.name` by turning
+# `-` into `_` (matching Rust identifier rules), giving `samurai_warriors5_fix`
+# -- both the compiled artifact's name and what rustc's crate-identifier lint
+# checks, satisfied together since the package name above is already the
+# hyphenated form of that same identifier.
+#
+# This is what the ASI loader loads directly, so it never gets a "Core"
+# suffix: there used to be a separate host crate that loaded this one as a
+# reloadable "core" DLL, so hooks could be updated without restarting the
+# game. Removed -- grapnel's MidHook can't prove no thread is still executing
+# inside a trampoline when unloading, and reloading crashed the game more
+# often than not. One process load, one set of hooks, for the process's life.
+crate-type = ["cdylib"]
+
+[dependencies]
+grapnel = "0.1"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.4"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_System_SystemServices",
+] }
+
+# Build against a local checkout instead of the published crate, so edits to
+# grapnel itself (e.g. dropping `release_max_level_off`) take effect here
+# immediately without needing to publish a new version first. Remove this
+# section to go back to the crates.io release.
+[patch.crates-io]
+grapnel = { path = "../grapnel" }
+
