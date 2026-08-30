@@ -22,7 +22,9 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "grapnel"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40a2944f817a8908f9ff504afc6e8b4d457ccd33ed9e7de7b462518f50ef51ef"
 dependencies = [
  "bytemuck",
  "cfg-if",

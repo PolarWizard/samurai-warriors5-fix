@@ -18,26 +18,13 @@ use windows::Win32::System::Time::FileTimeToSystemTime;
 static LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
 
 /// Opens (truncating) the log file at `path` for [`log`] to write into.
-///
-/// Deliberately bypasses the `log`/`simplelog` crates: grapnel's own
-/// `Cargo.toml` enables `log`'s `release_max_level_off` feature, and Cargo
-/// unifies that across the whole dependency graph -- there's only one copy of
-/// the `log` crate in the final binary, so that feature applies to every
-/// crate using it, not just grapnel. That compiles every `log::info!`/
-/// `log::error!` call -- including ones in this crate -- down to a complete
-/// no-op in release builds, and it can't be overridden from a dependent
-/// crate's `Cargo.toml` (`log` hard-errors if more than one
-/// `release_max_level_*` feature is active at once). Writing directly here
-/// sidesteps that entirely, in both build profiles.
 pub fn init_log_file(path: &str) {
     if let Ok(file) = File::create(path) {
         let _ = LOG_FILE.set(Mutex::new(file));
     }
 }
 
-/// A severity tag written into each log line. Purely a label for a human
-/// scanning the file after the fact -- nothing here filters by level, there
-/// is no verbosity setting in the config.
+/// A severity tag written into each log line.
 #[derive(Clone, Copy)]
 pub enum LogLevel {
     Info,
@@ -57,11 +44,7 @@ impl LogLevel {
     }
 }
 
-/// Formats a broken-down time the same way regardless of source (the current
-/// instant from `GetLocalTime`, or a file's modified time converted via
-/// `FileTimeToSystemTime`) -- `YYYY-MM-DDTHH:MM:SS.mmm`, sortable and
-/// unambiguous across a midnight boundary. No trailing `Z`: every caller feeds
-/// this local time, not UTC, and `Z` would misrepresent that.
+/// Formats a broken-down time: `YYYY-MM-DDTHH:MM:SS.mmm`
 fn format_systemtime(t: &SYSTEMTIME) -> String {
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
@@ -69,19 +52,8 @@ fn format_systemtime(t: &SYSTEMTIME) -> String {
     )
 }
 
-/// Appends a timestamped, level-tagged line to the file opened by
-/// [`init_log_file`], if any has been opened yet. See [`init_log_file`] for why
-/// this exists instead of just using `log::info!`.
-///
-/// File-only: there is no console attached, and a game running full-screen
-/// hides one anyway, so nothing in this project has ever actually read a line
-/// from stdout -- only from this file, after the fact.
-///
-/// `GetLocalTime` rather than `std::time::SystemTime`: it hands back a broken-
-/// down wall-clock time directly (`SYSTEMTIME.wHour`/`wMinute`/...), so
-/// stamping a line costs no epoch math, no timezone handling, and no date/time
-/// crate -- and it reads the same clock a screenshot's file-modified time does,
-/// which is what actually matters for lining a log line up with a capture.
+/// Appends a timestamped, level-tagged line to the file [`init_log_file`]
+/// opened, if one has been opened yet.
 fn log_at(level: LogLevel, message: &str) {
     let Some(file) = LOG_FILE.get() else { return };
     let Ok(mut file) = file.lock() else { return };
@@ -121,23 +93,24 @@ pub struct ModuleInfo {
     pub name: String,
     pub path: String,
     /// On-disk file size in bytes. A game patch changes this almost every
-    /// time, even a small one -- next to `modified`, this is what tells a bug
-    /// report apart from "the game updated since these signatures were
-    /// written" versus an unrelated regression.
+    /// time, even a small one. Together with `modified`, it distinguishes
+    /// "the game updated since these signatures were written" from an
+    /// unrelated regression in a bug report.
     pub size: u64,
-    /// The file's last-modified time, formatted the same way as every log
-    /// line (see `format_systemtime`). Converted from the filesystem's UTC
-    /// `FILETIME` through `FileTimeToLocalFileTime` first, so it reads on the
-    /// same clock as the rest of the log instead of needing a timezone
-    /// conversion by hand. `"unknown"` if the conversion fails for any reason
-    /// (e.g. the file disappearing between load and this call).
+    /// The file's last-modified time, formatted like every log line (see
+    /// `format_systemtime`). Converted from the filesystem's UTC `FILETIME`
+    /// through `FileTimeToLocalFileTime` first, so it reads on the same
+    /// clock as the rest of the log instead of needing a manual timezone
+    /// conversion. `"unknown"` if the conversion fails for any reason (e.g.
+    /// the file disappears between load and this call).
     pub modified: String,
 }
 
 /// Converts a `std::time::SystemTime` to a Win32 `FILETIME` (100ns ticks
-/// since 1601-01-01), the input `FileTimeToSystemTime`/`FileTimeToLocalFileTime`
-/// need. `11_644_473_600` is the fixed number of seconds between the Windows
-/// epoch and the Unix epoch that every such conversion uses.
+/// since 1601-01-01) -- the input format `FileTimeToSystemTime` and
+/// `FileTimeToLocalFileTime` expect. `11_644_473_600` is the fixed number of
+/// seconds between the Windows epoch and the Unix epoch that every such
+/// conversion uses.
 fn to_filetime(t: SystemTime) -> Option<FILETIME> {
     let dur = t.duration_since(UNIX_EPOCH).ok()?;
     let ticks = (dur.as_secs() + 11_644_473_600) * 10_000_000 + u64::from(dur.subsec_nanos()) / 100;
@@ -180,7 +153,7 @@ impl ModuleInfo {
 pub struct SignatureHook {
     pub tag: &'static str,
     pub signature: &'static str,
-    /// Byte offset from the pattern match to the actual hook point.
+    /// Byte offset from the pattern match to the hook point.
     pub offset: usize,
 }
 
@@ -208,9 +181,9 @@ fn parse_pattern(pattern: &str) -> Vec<Option<u8>> {
         .collect()
 }
 
-/// Overwrites memory at `address` with `pattern` (an IDA-style byte string, e.g.
-/// `"DE AD BE EF"`), temporarily marking the region writable and restoring its
-/// original protection afterward.
+/// Overwrites memory at `address` with `pattern` (an IDA-style byte string,
+/// e.g. `"DE AD BE EF"`), temporarily marking the region writable, then
+/// restoring its original protection.
 pub fn patch(address: usize, pattern: &str) {
     let bytes: Vec<u8> = pattern
         .split_whitespace()
@@ -305,15 +278,16 @@ pub fn pattern_scan_all(module: HMODULE, signature: &str) -> Vec<usize> {
 /// Installs a mid-function hook at a fixed `offset` from `module`'s base,
 /// bypassing signature scanning. A no-op if `enable` is false.
 ///
-/// Signatures are right for a shipped fix -- they survive a game patch moving
-/// code, and a wrong match is loud rather than silent. They are the wrong tool
-/// for instrumenting an address that Cheat Engine just named: the offset is
-/// already exact, and crafting a signature per probe wastes the round trip.
+/// Signatures are right for a shipped fix: they survive a game patch moving
+/// code, and a wrong match fails loudly rather than silently. They're the
+/// wrong tool for instrumenting an address Cheat Engine just found: the
+/// offset is already exact, and crafting a signature for each probe wastes
+/// the round trip.
 ///
 /// The returned handle is dropped rather than kept: `grapnel::MidHook` has no
-/// `Drop`, so a discarded handle simply stays installed -- which is correct
-/// here, since this DLL is never unloaded while the game runs. The hook only
-/// needs to outlive the process, not be reversible.
+/// `Drop`, so a discarded handle just stays installed -- correct here, since
+/// this DLL is never unloaded while the game runs. The hook only needs to
+/// outlive the process, not be reversible.
 ///
 /// No shipped fix should call this -- every fixed offset a shipped fix once
 /// used has since been converted to a signature (see `fixes::visibility` and

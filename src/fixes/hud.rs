@@ -3,16 +3,16 @@
 //! 3D position but drawn as flat screen-space quads).
 //!
 //! Unrelated to [`crate::fixes::visibility`]: whether a character's *model* is
-//! considered on-screen is a separate system from anything drawn here, and
-//! everything in this file assumes that question is already settled.
+//! considered on-screen is a separate system from anything drawn here. Every
+//! fix in this file assumes that question is already settled.
 //!
 //! Every fix below follows the same two-tier guard split as
 //! [`crate::fixes::visibility`]: whatever depends only on the resolved
 //! resolution -- fixed once at startup -- is computed once, before the hook
-//! is even installed, and captured by value into the closure. Whatever
-//! depends on the specific call the game is making right now (a register
-//! that could legitimately be null or out of range on any given call) is
-//! checked inside the closure, because it can only be known there.
+//! installs, and captured by value into the closure. Whatever depends on the
+//! specific call the game is making right now (a register that could
+//! legitimately be null or out of range on any given call) is checked inside
+//! the closure, because it can only be known there.
 
 use std::sync::atomic::Ordering;
 
@@ -69,8 +69,7 @@ fn fix_hud_projection_shape(module: &ModuleInfo) {
 
     let sig = SignatureHook { tag: "hud_projection_shape", signature: HUD_LAYOUT_SIG, offset: 0 };
     inject_hook(true, module, &sig, move |ctx| {
-        // RCX is the draw context the game passed in for this call -- not
-        // guaranteed non-null on every call to a shared layout function.
+        // RCX is the draw context the game passed in for this call
         if ctx.rcx == 0 {
             return;
         }
@@ -91,9 +90,9 @@ fn fix_hud_projection_shape(module: &ModuleInfo) {
                 // are order ~2/resolution. Their ratio cannot separate them --
                 // both are 1.7778.
                 //
-                // The orthographic one is the world-space HUD's, not the
-                // minimap's as first assumed: the minimap draws through a
-                // correct 2/3840 constant buffer. Its own buffer reads
+                // The orthographic one belongs to the world-space HUD, not
+                // the minimap: the minimap draws through a correct 2/3840
+                // constant buffer. Its own buffer reads
                 //   +040  0.00104 0 0 0     <- 2/1920
                 //   +050  0 0.00185 0 0     <- 2/1080
                 // a projection authored for a 1920-wide space while the target
@@ -154,8 +153,6 @@ fn fix_hud_text_scale(module: &ModuleInfo) {
 
     const TEXT_SCALE_SIG: &str = "E8 ?? ?? ?? ??    33 D2    48 8B 88 ?? ?? ?? ??    48 81 C1 ?? ?? ?? ??";
     let sig = SignatureHook { tag: "hud_text_scale", signature: TEXT_SCALE_SIG, offset: 0 };
-    // Confirmed still required after fix_hud_projection_shape: without it text
-    // renders oversized and spills outside the 16:9 band.
     inject_hook(true, module, &sig, move |ctx| {
         ctx.rbx = reference_width;
     });
@@ -172,7 +169,7 @@ fn fix_hud_text_scale(module: &ModuleInfo) {
 ///   +12C51E   divss xmm1,xmm0           <- returns width / denominator
 ///
 /// This is why `fix_hud_projection_shape` never reaches the minimap: it
-/// doesn't go through the shared UI projection at all, it derives its own
+/// doesn't go through the shared UI projection at all -- it derives its own
 /// scale here. Forcing EBX the same way `fix_hud_text_scale` does gives the
 /// minimap its correct size.
 ///
@@ -215,9 +212,9 @@ fn fix_minimap_scale(module: &ModuleInfo) {
 ///   +ac7d  mov    rax,[rcx]           <- hooked here, both halves written
 ///   +ac80  call   qword ptr [rax+0x18]
 ///
-/// Eight floats is most likely four (x, y) corners, so the X components are
-/// the even indices -- that's what's shifted, by the same fixed offset every
-/// call, since it depends only on the resolved width and height.
+/// Eight floats are most likely four (x, y) corners, so the X components --
+/// the even indices -- are what's shifted, by a fixed offset that depends
+/// only on the resolved width and height.
 fn fix_minimap_position_gameplay(module: &ModuleInfo) {
     const MINIMAP_GAMEPLAY_RECT_SIG: &str = "0F 11 4D 37    0F 11 55 27    48 8B 01    FF 50 18";
 
@@ -233,24 +230,11 @@ fn fix_minimap_position_gameplay(module: &ModuleInfo) {
         offset: 8,
     };
     inject_hook(true, module, &sig, move |ctx| {
-        // RDX is the rect pointer for this specific call -- not guaranteed
-        // non-null on every call to a shared draw function.
         if ctx.rdx == 0 {
             return;
         }
         unsafe {
             let rect = ctx.rdx as *mut f32;
-            // The logged rect [1434 81 | 1856 81 | 1434 503 | 1856 503]
-            // confirmed the (x,y)-pair layout (even indices = X) and confirmed
-            // fix_minimap_scale is working -- it's exactly half the 2868..3712
-            // RenderDoc measured before the scale fix. A RenderDoc capture
-            // ruled out every mechanism that could make a shifted quad
-            // disappear instead of move: single draw, straight to the
-            // backbuffer, full 3840x1080 viewport with the scissor disabled,
-            // normalised atlas UVs unaffected by the shift, and a cbuffer of
-            // (2/3840, -2/1080, -1, +1) mapping X 1:1 to screen pixels. At
-            // +960 the quad lands at x 2394..2816, NDC 0.247..0.467 --
-            // comfortably on screen.
             *rect.add(0) += band_offset;
             *rect.add(2) += band_offset;
             *rect.add(4) += band_offset;
@@ -275,9 +259,7 @@ fn fix_minimap_position_gameplay(module: &ModuleInfo) {
 ///
 /// Same shift as [`fix_minimap_position_gameplay`] on the even (X) indices --
 /// same formula too, `(w - h*16/9) * 0.5`, the width of the margin outside
-/// the centred 16:9 band on one side. Unlike the gameplay path this function
-/// does one draw with one rect, so the map simply moves rather than needing
-/// the two-layer overlap handling above.
+/// the centred 16:9 band on one side.
 fn fix_minimap_position_menu(module: &ModuleInfo) {
     const MENU_MAP_RECT_SIG: &str = "F3 0F 11 5C 24 3C    48 8B 01    F3 0F 11 44 24 20    FF 10";
 
@@ -286,10 +268,6 @@ fn fix_minimap_position_menu(module: &ModuleInfo) {
         RENDER_HEIGHT.load(Ordering::Relaxed),
     );
     let band_offset = (w as f32 - h as f32 * 16.0 / 9.0) * 0.5;
-    if !(band_offset > 0.0) {
-        log("minimap_position_menu: resolution not resolved or already 16:9, skipping");
-        return;
-    }
 
     let sig = SignatureHook { tag: "minimap_position_menu", signature: MENU_MAP_RECT_SIG, offset: 6 };
     inject_hook(true, module, &sig, move |ctx| {
@@ -356,17 +334,12 @@ fn fix_hud_marker_position(module: &ModuleInfo) {
     );
     let scale = (w as f32 / h as f32) / GAME_ASPECT;
 
-    // The signature ends exactly where XMM1 holds halfW and XMM8 holds ndc_x,
-    // about to be scaled by it -- offset equals the signature's own length.
     let sig = SignatureHook {
         tag: "hud_marker_position",
         signature: MARKER_POSITION_SIG,
         offset: 9,
     };
     inject_hook(true, module, &sig, move |ctx| {
-        // XMM1 (halfW) is the value the game computed for this specific call
-        // -- checked before scaling so a wrong signature match fails silently
-        // instead of writing a garbage value in.
         let half = &mut ctx.xmm1.f32()[0];
         if !half.is_finite() || *half <= 0.0 {
             return;
@@ -400,19 +373,21 @@ fn fix_hud_marker_position(module: &ModuleInfo) {
 /// touched.
 ///
 /// Both `JA`s are found relative to the `COMISS` between them rather than by
-/// their own bytes. A `JA rel32`'s target is a code-relative displacement,
-/// which shifts if anything between the jump and +29dc8b changes size in a
-/// future build, even when this branch itself is untouched -- so matching a
-/// jump's own encoded target is fragile in a way matching an adjacent
-/// instruction is not. `COMISS XMM9,[R11+RBX*1+0x1748]`'s encoding --
-/// `45 0F 2F 8C 1B`, everything before the trailing struct-offset immediate --
-/// is confirmed unique image-wide, and the two `JA`s sit at fixed byte
-/// distances from it (6 bytes before, 9 after) because they are instructions
-/// in the same unbroken sequence, not independently located. Each site is
-/// then verified as `0F 87` (`JA rel32`'s opcode) before being NOPed, which
-/// confirms the position assumption held without requiring the jump target
-/// itself to match -- that target is expected to legitimately differ from
-/// what is recorded here and plays no part in identifying this code.
+/// their own bytes. A `JA rel32`'s target is a code-relative displacement: it
+/// shifts if anything between the jump and +29dc8b changes size in a future
+/// build, even when this branch itself is untouched. Matching a jump by its
+/// own encoded target is therefore fragile in a way matching an adjacent
+/// instruction is not.
+///
+/// `COMISS XMM9,[R11+RBX*1+0x1748]`'s encoding -- `45 0F 2F 8C 1B`, everything
+/// before the trailing struct-offset immediate -- is confirmed unique
+/// image-wide. The two `JA`s sit at fixed byte distances from it (6 bytes
+/// before, 9 after), because they're instructions in the same unbroken
+/// sequence, not independently located. Each site is then verified as `0F 87`
+/// (`JA rel32`'s opcode) before being NOPed. That confirms the position
+/// assumption held without requiring the jump's target to match -- the target
+/// legitimately differs from what's recorded here and plays no part in
+/// identifying this code.
 ///
 /// Verified before writing either NOP: a byte patch on the wrong location --
 /// particularly one that turns out to be a branch target rather than

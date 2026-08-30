@@ -19,14 +19,6 @@ use crate::utils::{log, log_error, log_warn};
 #[derive(Deserialize, Debug)]
 #[serde(default)]
 pub struct Config {
-    /// Whether any fix in this mod applies at all. `bool`'s own default is
-    /// `false`, which would silently disable everything for anyone whose
-    /// config predates this field or omits it -- `default_true` overrides
-    /// that for this one field, both when the key is missing from an
-    /// otherwise-valid file and when the whole file fails to load (see
-    /// `impl Default for Config` below, which has to agree with this for the
-    /// same reason: two separate defaulting paths that need the same answer).
-    #[serde(default = "default_true")]
     pub super_enable: bool,
     pub resolution: ResolutionConfig,
 }
@@ -37,10 +29,6 @@ impl Default for Config {
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Deserialize, Default, Debug)]
 #[serde(default)]
 pub struct ResolutionConfig {
@@ -49,18 +37,19 @@ pub struct ResolutionConfig {
 }
 
 /// Reads `samurai_warriors5_fix.toml` from the same directory as `this_module`,
-/// then logs the config that is actually in effect regardless of which path
-/// below produced it -- including the disabled-mod case, which otherwise
-/// would be the one time nothing ever shows what the file actually contained.
+/// then logs whichever config ends up in effect, regardless of which path
+/// below produced it. That includes the disabled-mod case: otherwise,
+/// disabling the mod would be the one path that never shows what the file
+/// actually contained.
 pub fn load(this_module: HMODULE) -> Config {
     let config = load_inner(this_module);
     log(&format!("config: {config:?}"));
     config
 }
 
-/// `this_module` must be *this DLL's* own handle (`DllMain`'s first
-/// parameter), not the game's -- a relative filename would depend on the
-/// process's current working directory, which for a launched game is its
+/// `this_module` must be *this DLL's own* handle (`DllMain`'s first
+/// parameter), not the game's. A relative filename would depend on the
+/// process's current working directory -- for a launched game, that's its
 /// install root, not the `scripts` folder this DLL and its config actually
 /// live in.
 ///

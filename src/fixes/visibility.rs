@@ -39,25 +39,24 @@ static ASPECT_FIX_LOGGED: AtomicU32 = AtomicU32::new(0);
 /// the aspect lowers `m00`, widening the horizontal frustum -- vertical FOV
 /// untouched, matching how the scene already renders.
 ///
-/// The same builder serves other cameras, and the rendered field of view is
-/// already correct without this hook touching it, so the write only applies
+/// The same builder serves other cameras, and their rendered field of view is
+/// already correct without this hook touching it. So the write applies only
 /// when `RCX` is one of the two camera blocks' own projections: `singleton +
 /// 0x1460 + camIdx*0x320 + 0xc0` for `camIdx` 0 and 1 -- one camera per player
 /// in this game's 2-player split-screen. If the rendered field of view ever
 /// visibly widens along with this fix, that means the scoping matched
-/// something it should not have, and this check is the first thing to
-/// re-examine.
+/// something it should not have -- re-check this guard first.
 ///
 /// Hooked by signature: the function's own prologue (`PUSH RBX; SUB RSP,0x40`)
-/// recurs 51 times image-wide, but extending through the next instruction's
-/// opcode and addressing mode -- `MULSS XMM1` via a RIP-relative operand --
-/// narrows that to exactly one match. The trailing 4-byte displacement is
-/// wildcarded: it points at the float constant `0.5f`, whose address shifts
-/// whenever anything earlier in `.rdata` changes size, independent of whether
-/// this is still the right function.
+/// recurs 51 times image-wide. Extending through the next instruction's opcode
+/// and addressing mode -- `MULSS XMM1` via a RIP-relative operand -- narrows
+/// that to exactly one match. The trailing 4-byte displacement is wildcarded:
+/// it points at the float constant `0.5f`, whose address shifts whenever
+/// anything earlier in `.rdata` changes size, independent of whether this is
+/// still the right function.
 ///
-/// Two tiers of guard, checked at two different times, is what the rest of
-/// this function comes down to:
+/// The rest of this function comes down to two tiers of guard, checked at two
+/// different times:
 ///
 /// * Whether the configured resolution is wide enough to need correcting at
 ///   all is *this project's own* state, fixed once at startup -- so it is
@@ -78,28 +77,28 @@ pub fn fix_npc_visibility(module: &ModuleInfo) {
 
     let sig = SignatureHook { tag: "npc_visibility", signature: PROJECTION_BUILDER_SIG, offset: 0 };
     inject_hook(true, module, &sig, move |ctx| unsafe {
-        // This is very fragile, and this is a raw offset to a global
-        // variable's storage slot in the module's own data section.
-        // That slot's position depends on the layout of everything
-        // the compiler places in that section — adding, removing, or
-        // resizing some totally unrelated global anywhere in the
-        // game could shift it. A game update will almost certainly
-        // break this fix, and probably crash the game, but it's a
-        // single player game released ~6 years ago, as of writing
-        // this, and the game getting an update is like 0% chance.
+        // Hardcoded rather than signature-derived, unlike everything else in
+        // this project -- a deliberate exception. This is a raw offset to a
+        // global's storage slot in the module's own data section. That slot's
+        // position depends on the layout of everything the compiler places in
+        // that section, so it moves if any unrelated global anywhere in the
+        // game is added, removed, or resized. A signature scan on the
+        // instruction that materializes this pointer (wildcarding its
+        // RIP-relative displacement, the same technique the outer hook on
+        // this function already uses) would be the correct fix if this game
+        // saw further updates. It hasn't in years, and single-player games
+        // this old rarely do. The hardcoded offset is accepted here as a
+        // low-risk tradeoff rather than converted.
         const SINGLETON_PTR: usize = 0x156c350;
 
-        // CAMERA_BLOCK, CAMERA_BLOCK_STRIDE, and CAMERA_PROJECTION
-        // are member offsets inside one specific class — those only
-        // move if that one class's own fields change, which is a much
-        // narrower, more deliberate kind of edit. You're right to
-        // treat them differently.
+        // CAMERA_BLOCK, CAMERA_BLOCK_STRIDE, and CAMERA_PROJECTION are member
+        // offsets inside one specific class -- those only move if that
+        // class's own fields change, a narrower and more deliberate kind of
+        // edit than anything that shifts SINGLETON_PTR above.
         const CAMERA_BLOCK: usize = 0x1460;
         const CAMERA_BLOCK_STRIDE: usize = 0x320;
         const CAMERA_PROJECTION: usize = 0xc0;
 
-        // The game's own object, built during its own startup -- not
-        // guaranteed to exist yet on an early call.
         let singleton = *((base + SINGLETON_PTR) as *const usize);
 
         let camera_0 = singleton + CAMERA_BLOCK + CAMERA_PROJECTION;
@@ -109,9 +108,6 @@ pub fn fix_npc_visibility(module: &ModuleInfo) {
             return;
         }
 
-        // XMM2 is the aspect argument as the game passed it in. Checked
-        // before overwriting so a wrong signature match fails silently
-        // instead of writing a garbage value into a matrix.
         let current = &mut ctx.xmm2.f32()[0];
         if !current.is_finite() || *current <= 0.0 {
             return;

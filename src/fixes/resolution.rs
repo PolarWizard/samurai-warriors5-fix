@@ -7,18 +7,18 @@ use crate::{RENDER_HEIGHT, RENDER_WIDTH};
 
 /// Forces every selectable resolution in the Graphics menu to the resolved
 /// width/height, so whichever entry the game has stored as "last selected" --
-/// including one saved from before this ran -- always ends up applying the
-/// same value rather than depending on which entry that happens to be.
+/// even one saved before this ran -- always resolves to the same value,
+/// regardless of which entry that is.
 ///
 /// Width and height are two separate lookup tables, not paired structs: one
 /// function at SW5.exe+0xfcd0 returns a width for an index 0..10, a second at
 /// SW5.exe+0xfd50 returns a height for the same index, and other code presumably
-/// calls both with whichever index is currently selected. Each builds its
-/// table as eleven `mov [rax+disp8], imm32` stores (opcode + ModRM + disp8 +
-/// imm32, 7 bytes each) against the pre-adjustment stack pointer, so scanning
+/// calls both with whichever index is currently selected. Each function builds
+/// its table as eleven `mov [rax+disp8], imm32` stores (opcode + ModRM + disp8
+/// + imm32, 7 bytes each) against the pre-adjustment stack pointer. Scanning
 /// for the exact bytes of a known entry's store finds that one instruction
-/// uniquely, and rewriting just the trailing 4-byte immediate changes only
-/// what that entry returns.
+/// uniquely; rewriting just the trailing 4-byte immediate changes only what
+/// that entry returns.
 ///
 /// Index 0 in both tables stores 0, not a resolution -- almost certainly a
 /// sentinel some other code path checks for (this project's own `RENDER_WIDTH`

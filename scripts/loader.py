@@ -12,8 +12,8 @@ import zipfile
 from pathlib import Path
 
 LOADER_URL = "https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/x64-latest/dinput8-x64.zip"
-LOADER_DLL_NAME = "xinput1_1.dll"
-LOADER_HASH_NAME = "xinput1_1-x64.SHA512"
+LOADER_DLL_NAME = "dinput8.dll"
+LOADER_HASH_NAME = "dinput8-x64.SHA512"
 
 
 def install_loader(game_folder: str) -> None:

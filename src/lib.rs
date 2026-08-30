@@ -28,12 +28,6 @@ static RENDER_HEIGHT: AtomicU32 = AtomicU32::new(0);
 fn log_open(module: &ModuleInfo) {
     init_log_file("samurai_warriors5_fix.log");
 
-    // GIT_HASH/RUSTC_VERSION come from build.rs, which shells out to `git`
-    // and `rustc` at compile time -- there's no other way to get either into
-    // a compiled binary, since Cargo doesn't expose them as env vars itself.
-    // Pinpointing the exact source commit matters more here than
-    // CARGO_PKG_VERSION: that only changes when someone remembers to bump
-    // Cargo.toml, while every real change already has a commit.
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     log("-------------------------------------");
     log(&format!("Version: {}-{} ({profile})", env!("CARGO_PKG_VERSION"), env!("GIT_HASH")));
@@ -41,9 +35,6 @@ fn log_open(module: &ModuleInfo) {
     log(&format!("Module Name: {}", module.name));
     log(&format!("Module Path: {}", module.path));
     log(&format!("Module Addr: {:#x}", module.address.0 as usize));
-    // Size/modified identify exactly which build of the game this is --
-    // signatures in fixes/ are matched against specific game bytes, and a
-    // patch changing them is the main way a signature scan can start failing.
     log(&format!("Module Size: {:#x} ({} bytes)", module.size, module.size));
     log(&format!("Module Modified: {}", module.modified));
     log("-------------------------------------");
@@ -62,14 +53,10 @@ fn log_open(module: &ModuleInfo) {
 /// only exists to locate the config file next to this DLL regardless of the
 /// game's current working directory; nothing else here needs it.
 fn init(this_module: HMODULE) {
-    // There is no console to catch the default panic hook's output -- a
-    // full-screen game with no console attached leaves it with nowhere to go
-    // -- so this is the only way a panic's message and location reach the log
-    // file rather than vanishing.
+    // Catch a panic's message and location reach the log file rather than vanishing.
     std::panic::set_hook(Box::new(|info| log_error(&format!("panic: {info}"))));
 
-    // Gracefully isolates a panic if one where to happen so it does not crash
-    // the process.
+    // Catches a panic here instead of letting it crash the process.
     let result = catch_unwind(|| {
         let handle = unsafe { GetModuleHandleA(None) }.expect("failed to get module handle");
         let module = ModuleInfo::new(handle);

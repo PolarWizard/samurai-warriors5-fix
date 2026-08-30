@@ -39,10 +39,6 @@ def licenses() -> None:
     own_license = (ROOT / "LICENSE").read_text(encoding="utf-8").strip()
     banner = "=" * 80
 
-    # Same layout SamuraiWarriors4DXFix's committed LICENSES file uses --
-    # banner, name, banner, raw text, repeated per entry -- except here it's
-    # generated on demand instead of hand-maintained, since cargo-about
-    # already tracks every dependency's license via Cargo.lock.
     dest = ROOT / "LICENSES"
     dest.write_text(f"{banner}\n{FIX_NAME}\n{banner}\n{own_license}\n\n{third_party_text}", encoding="utf-8")
     print(f"Wrote -> {dest}")
