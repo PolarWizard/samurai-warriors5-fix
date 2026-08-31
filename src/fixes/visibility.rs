@@ -3,14 +3,10 @@
 //! 16:9 band happens upstream of any nameplate or health bar, and would
 //! happen even with every HUD fix disabled.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::Ordering;
 
-use crate::utils::{ModuleInfo, SignatureHook, inject_hook, log};
+use crate::utils::{ModuleInfo, SignatureHook, inject_hook};
 use crate::{RENDER_HEIGHT, RENDER_WIDTH};
-
-/// Set once the fix has actually fired, so a silent miss is visible in the log
-/// rather than looking like a fix that did nothing.
-static ASPECT_FIX_LOGGED: AtomicU32 = AtomicU32::new(0);
 
 /// Widens the camera's cull frustum to the real screen aspect.
 ///
@@ -107,24 +103,14 @@ pub fn fix_npc_visibility(module: &ModuleInfo) {
         let camera_0 = singleton + CAMERA_0_OFFSET;
         let camera_1 = singleton + CAMERA_1_OFFSET;
         let dst = ctx.rcx as usize;
-        let which = if dst == camera_0 {
-            0
-        } else if dst == camera_1 {
-            1
-        } else {
+        if dst != camera_0 && dst != camera_1 {
             return;
         };
 
-        let current = &mut ctx.xmm2.f32()[0];
-        if !current.is_finite() || *current <= 0.0 {
+        if ctx.xmm2.f32()[0] <= 0.0 {
             return;
         }
 
-        if ASPECT_FIX_LOGGED.fetch_add(1, Ordering::Relaxed) == 0 {
-            log(&format!(
-                "npc_visibility: camera {which} (dst={dst:#x}) rebuilt with aspect {current:.4} -> {aspect:.4}"
-            ));
-        }
-        *current = aspect;
+        ctx.xmm2.f32()[0] = aspect;
     });
 }
