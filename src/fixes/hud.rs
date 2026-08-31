@@ -340,11 +340,7 @@ fn fix_hud_marker_position(module: &ModuleInfo) {
         offset: 9,
     };
     inject_hook(true, module, &sig, move |ctx| {
-        let half = &mut ctx.xmm1.f32()[0];
-        if !half.is_finite() || *half <= 0.0 {
-            return;
-        }
-        *half *= scale;
+        ctx.xmm1.f32()[0] *= scale;
     });
 }
 
