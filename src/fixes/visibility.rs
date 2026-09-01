@@ -107,10 +107,6 @@ pub fn fix_npc_visibility(module: &ModuleInfo) {
             return;
         };
 
-        if ctx.xmm2.f32()[0] <= 0.0 {
-            return;
-        }
-
         ctx.xmm2.f32()[0] = aspect;
     });
 }

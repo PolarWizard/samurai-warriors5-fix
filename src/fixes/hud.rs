@@ -230,9 +230,6 @@ fn fix_minimap_position_gameplay(module: &ModuleInfo) {
         offset: 8,
     };
     inject_hook(true, module, &sig, move |ctx| {
-        if ctx.rdx == 0 {
-            return;
-        }
         unsafe {
             let rect = ctx.rdx as *mut f32;
             *rect.add(0) += band_offset;
@@ -271,9 +268,6 @@ fn fix_minimap_position_menu(module: &ModuleInfo) {
 
     let sig = SignatureHook { tag: "minimap_position_menu", signature: MENU_MAP_RECT_SIG, offset: 6 };
     inject_hook(true, module, &sig, move |ctx| {
-        if ctx.rdx == 0 {
-            return;
-        }
         unsafe {
             let rect = ctx.rdx as *mut f32;
             *rect.add(0) += band_offset;
