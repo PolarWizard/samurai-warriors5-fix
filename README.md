@@ -1,5 +1,5 @@
 # SAMURAI WARRIORS 5 Fix
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/PolarWizard/samurai_warriors5_fix/total)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/PolarWizard/samurai-warriors5-fix/total)
 
 ***This project is designed exclusively for Windows due to its reliance on Windows-specific APIs.***
 
