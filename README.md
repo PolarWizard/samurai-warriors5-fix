@@ -40,3 +40,6 @@ If you're using VS Code, the same steps are wired up as tasks in `.vscode/tasks.
 
 ## License
 Distributed under the MIT License. See [LICENSE](LICENSE) for more information. Third-party license text for every dependency can be generated with `python scripts/licenses.py`, which writes it out to `LICENSES`.
+
+## Special Thanks
+- Thank you Lyall from wsgf for the [original fix](https://www.reddit.com/r/widescreengamingforum/comments/ovkvpt/samurai_warriors_5_ultrawide_fix/)!
